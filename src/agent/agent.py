@@ -335,5 +335,5 @@ if __name__ == "__main__":
     print("it will learn to use the special token format correctly.")
     print("=" * 60)
     
-    print("\n✅ All agent tests passed")
+    print("\n All agent tests passed")
     print("=" * 60)
