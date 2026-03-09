@@ -1,0 +1,17 @@
+# Core deep learning
+torch>=2.0.0
+numpy>=1.24.0
+
+# Data loading
+datasets>=2.14.0
+tiktoken>=0.5.0
+
+# Training utilities
+tqdm>=4.65.0
+
+# Optional: for better performance
+# accelerate>=0.20.0
+
+# Development
+# pytest>=7.4.0
+# black>=23.0.0
