@@ -1,57 +1,55 @@
-# SLM - Small Language Model with Agentic Capabilities
+# SLM: a small LLaMA-style language model, built from scratch
 
-A production-grade small language model (~15M parameters) built from scratch with modern transformer architecture and tool-use capabilities.
+A 15.7M-parameter decoder-only transformer written from scratch in PyTorch. It has the main parts of the LLaMA architecture (RoPE, grouped-query attention, RMSNorm, SwiGLU), a KV cache for fast generation, a full training pipeline on TinyStories, and a ReAct-style agent layer with a tool registry.
 
-## Project Overview
+This is a learning project. The model is small on purpose, so the whole pipeline — tokenize, train, sample, run an agent loop — can be read, run and changed quickly.
 
-This project implements a complete small language model training and deployment pipeline:
+## What's in it
 
-- **Modern Architecture**: LLaMA-style transformer with RoPE, GQA, RMSNorm, and SwiGLU
-- **Efficient Inference**: KV caching for fast autoregressive generation
-- **Agentic System**: ReAct loop with tool use (calculator, memory, clock, search)
-- **Production-Ready**: Mixed precision training, checkpointing, resumable training
-
-### Key Features
-
-- **~15M parameters** - Fast training and inference on consumer hardware
-- **Grouped Query Attention (GQA)** - 3× memory savings vs standard attention
-- **RoPE positional embeddings** - Better length generalization
-- **SwiGLU activation** - Superior to ReLU for transformers
-- **Tool use** - Calculator, memory, clock, and extensible tool registry
-- **Flexible sampling** - Greedy, temperature, top-k, top-p, nucleus
-- **Complete training pipeline** - From raw data to deployed model
+- **Model:** a LLaMA-style decoder with RoPE, grouped-query attention (6 query heads, 2 KV heads), pre-norm RMSNorm, SwiGLU feed-forward layers and tied input/output embeddings.
+- **Inference:** a KV cache for autoregressive generation, with greedy, temperature, top-k and top-p sampling.
+- **Training:** a TinyStories data pipeline, AdamW with warmup and cosine decay, gradient accumulation, mixed precision, and checkpoints that training can resume from.
+- **Agent layer:** a ReAct loop, a parser for tool calls, and an extensible tool registry (calculator, memory, clock).
 
 ## Architecture
 
 ```
-Model Size: ~15.7M parameters
-├── Embedding: 3.1M (vocab=8192, d_model=384)
-├── 8× Transformer Blocks: 12.4M
+SLM: ~15.7M parameters
+├── Token embedding: 3.15M (vocab 8,192 × d_model 384)
+├── 8 × transformer block: 12.6M in total
 │   ├── RMSNorm (pre-attention)
-│   ├── Grouped Query Attention (6 Q heads, 2 KV heads)
-│   │   └── RoPE positional encoding
+│   ├── Grouped-query attention: 6 query heads, 2 KV heads, head dim 64
+│   │   └── RoPE on queries and keys
 │   ├── RMSNorm (pre-FFN)
-│   └── SwiGLU FFN (intermediate=1024)
-└── Output: Tied with embedding
+│   └── SwiGLU feed-forward (hidden size 1,024)
+├── Final RMSNorm
+└── Output projection: tied to the token embedding
 
-Training Dataset: TinyStories (~2.1M short stories)
-Context Window: 512 tokens
+Context window: 512 tokens
+Training data: TinyStories (~2.1M short stories)
 ```
 
-## Quick Start
+### Why each component
 
-### Installation
+| Component | What it does here |
+|---|---|
+| RoPE | Encodes position by rotating query and key vectors, so attention scores depend on relative position. Trained and used at 512 tokens; there is no context extension. |
+| Grouped-query attention | 6 query heads share 2 key/value heads, which makes the KV cache 3x smaller: 4 KiB per token in fp16 (2 × 8 layers × 2 KV heads × 64 dims × 2 bytes) against 12 KiB with standard multi-head attention. |
+| RMSNorm, pre-norm | Normalizes the input to each sublayer, which keeps training stable. RMSNorm skips LayerNorm's mean subtraction. |
+| SwiGLU | The gated feed-forward layer LLaMA uses: three projections instead of two. |
+| Tied embeddings | The output layer reuses the embedding matrix, saving 3.15M parameters. |
+
+## Quick start
+
+### Install
 
 ```bash
-# Clone repository
-git clone <your-repo-url>
+git clone https://github.com/SahilVankudre/slm.git
 cd slm
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-### Training
+### Train
 
 ```bash
 # Quick test (100 steps, small dataset)
@@ -64,11 +62,11 @@ python scripts/train.py \
     --learning_rate 3e-4 \
     --use_amp
 
-# Resume from checkpoint
+# Resume from a checkpoint
 python scripts/train.py --resume_from checkpoints/checkpoint_step_10000.pt
 ```
 
-### Inference
+### Generate and chat
 
 ```bash
 # Interactive chat (normal mode)
@@ -78,7 +76,7 @@ python scripts/chat.py --checkpoint checkpoints/best_model.pt --mode normal
 python scripts/chat.py --checkpoint checkpoints/best_model.pt --mode agent
 ```
 
-## Project Structure
+## Project structure
 
 ```
 slm/
@@ -87,18 +85,18 @@ slm/
 │   │   ├── config.py           # Model configuration
 │   │   ├── normalization.py    # RMSNorm
 │   │   ├── rope.py             # Rotary positional embeddings
-│   │   ├── attention.py        # Grouped Query Attention + KV cache
+│   │   ├── attention.py        # Grouped-query attention + KV cache
 │   │   ├── ffn.py              # SwiGLU feed-forward
 │   │   ├── block.py            # Transformer block
 │   │   └── slm.py              # Top-level model
 │   │
 │   ├── tokenizer/
-│   │   └── tokenizer.py        # BPE tokenizer (tiktoken wrapper)
+│   │   └── tokenizer.py        # BPE tokenizer
 │   │
 │   ├── training/
 │   │   ├── dataset.py          # TinyStories data pipeline
 │   │   ├── trainer.py          # Training loop
-│   │   └── scheduler.py        # Cosine LR + warmup
+│   │   └── scheduler.py        # Warmup + cosine LR schedule
 │   │
 │   ├── inference/
 │   │   ├── sampler.py          # Sampling strategies
@@ -106,7 +104,7 @@ slm/
 │   │
 │   └── agent/
 │       ├── tools.py            # Tool registry + implementations
-│       ├── parser.py           # Output parser for tool calls
+│       ├── parser.py           # Parser for tool calls in model output
 │       └── agent.py            # ReAct loop
 │
 ├── scripts/
@@ -117,22 +115,24 @@ slm/
 └── README.md
 ```
 
-## Usage Examples
+## Usage
 
 ### Python API
 
 ```python
+import torch
+
 from src.model.slm import SLM
 from src.model.config import ModelConfig
 from src.tokenizer.tokenizer import Tokenizer
 from src.inference.generate import Generator
 
-# Load model
+# Load the model
 config = ModelConfig()
 model = SLM(config)
 model.load_state_dict(torch.load("checkpoints/best_model.pt"))
 
-# Create generator
+# Create a generator
 tokenizer = Tokenizer()
 generator = Generator(model, tokenizer, device="cuda")
 
@@ -141,30 +141,12 @@ output = generator.generate(
     "Once upon a time",
     max_new_tokens=100,
     temperature=0.8,
-    top_p=0.9
+    top_p=0.9,
 )
 print(output)
 ```
 
-### Agent System
-
-```python
-from src.agent.agent import Agent
-
-# Create agent
-agent = Agent(generator, verbose=True)
-
-# Use tools
-response = agent.run("What is 15 times 7?")
-# Model will use calculator tool and respond with "105"
-
-# Multi-turn conversation
-agent.chat("Remember my name is Alice")  # Uses memory tool
-agent.chat("What time is it?")           # Uses clock tool
-agent.chat("What's my name?")            # Retrieves from memory
-```
-
-### Chat Commands
+### Chat commands
 
 When running `scripts/chat.py`:
 
@@ -173,41 +155,45 @@ When running `scripts/chat.py`:
 /reset      - Clear conversation history
 /agent      - Switch to agent mode
 /normal     - Switch to normal mode
-/preset X   - Use sampling preset (greedy, creative, balanced, focused, precise)
+/preset X   - Use a sampling preset (greedy, creative, balanced, focused, precise)
 /verbose    - Toggle debug output
 /exit       - Exit chat
 ```
 
-## Training Configuration
+## Agent layer
 
-### Model Hyperparameters
+```mermaid
+flowchart LR
+    U[User message] --> M[Model generates]
+    M --> P{Parser: tool call?}
+    P -- yes --> T[Registry runs the tool]
+    T --> O[Result added to the context]
+    O --> M
+    P -- no --> A[Final answer]
+```
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `d_model` | 384 | Hidden dimension |
-| `n_layers` | 8 | Transformer blocks |
-| `n_heads` | 6 | Query attention heads |
-| `n_kv_heads` | 2 | Key/value heads (GQA) |
-| `max_seq_len` | 512 | Context window |
-| `vocab_size` | 50265 | Tokenizer vocabulary |
+`parser.py` extracts a tool call from the model's output, the registry runs it, and the result goes back into the context for the next step. The loop takes any generator, so the parser, registry and loop can be tested with scripted outputs or with a larger model.
 
-### Training Hyperparameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `batch_size` | 32 | Batch size |
-| `gradient_accumulation_steps` | 4 | Gradient accumulation |
-| `max_steps` | 20000 | Training steps |
-| `learning_rate` | 3e-4 | Peak learning rate |
-| `warmup_steps` | 2000 | LR warmup steps |
-| `weight_decay` | 0.1 | AdamW weight decay |
-
-## Extending the Project
-
-### Adding Custom Tools
+**Tool use and model size.** TinyStories contains no tool-call examples, so a model trained only on it isn't expected to produce the tool-call format reliably. Getting reliable tool use from this model needs fine-tuning on tool-call transcripts (see Next steps).
 
 ```python
-from src.agent.tools import Tool
+from src.agent.agent import Agent
+
+agent = Agent(generator, verbose=True)
+
+# Routes to the calculator when the model emits a well-formed tool call
+response = agent.run("What is 15 times 7?")
+
+# Multi-turn conversation
+agent.chat("Remember my name is Alice")  # memory tool
+agent.chat("What time is it?")           # clock tool
+agent.chat("What's my name?")            # reads from memory
+```
+
+### Adding a tool
+
+```python
+from src.agent.tools import Tool, ToolRegistry
 
 class CustomTool(Tool):
     def __init__(self):
@@ -215,59 +201,104 @@ class CustomTool(Tool):
         self.name = "my_tool"
         self.description = "Does something useful"
         self.parameters = {"arg1": "Description of arg1"}
-    
+
     def execute(self, arg1: str) -> str:
         # Your tool logic here
         return f"Processed: {arg1}"
 
-# Register with agent
-from src.agent.tools import ToolRegistry
 registry = ToolRegistry()
 registry.register(CustomTool())
 ```
 
-### Custom Sampling Strategies
+### Custom sampling
 
 ```python
 from src.inference.sampler import Sampler
 
-# Create custom sampler
+# Write your own sampler
 def my_sample(logits, param=1.0):
     # Your sampling logic
     return sampled_tokens
 
-# Or use built-in
+# Or use the built-in options
 output = generator.generate(
     prompt,
     temperature=0.7,
     top_k=50,
-    top_p=0.9
+    top_p=0.9,
 )
 ```
 
-## Performance
+## Configuration
 
-Training performance on A100 GPU:
+### Model
 
-- **Throughput**: ~50K tokens/sec
-- **Memory**: ~8GB VRAM (with mixed precision)
-- **Training time**: ~4 hours for 20K steps
-- **Inference**: ~100 tokens/sec (with KV cache)
+| Parameter | Value | Description |
+|---|---|---|
+| `d_model` | 384 | Hidden dimension |
+| `n_layers` | 8 | Transformer blocks |
+| `n_heads` | 6 | Query heads (head dim 64) |
+| `n_kv_heads` | 2 | Key/value heads (GQA) |
+| `d_ff` | 1,024 | SwiGLU hidden size |
+| `max_seq_len` | 512 | Context window |
+| `vocab_size` | 8,192 | Tokenizer vocabulary |
 
-## License
+### Training
 
-This project is built for educational and portfolio purposes.
+| Parameter | Default | Description |
+|---|---|---|
+| `batch_size` | 32 | Sequences per micro-batch |
+| `gradient_accumulation_steps` | 4 | Effective batch of 128 sequences |
+| `max_steps` | 20,000 | Training steps |
+| `learning_rate` | 3e-4 | Peak learning rate |
+| `warmup_steps` | 2,000 | Linear warmup before cosine decay |
+| `weight_decay` | 0.1 | AdamW weight decay |
+| `--use_amp` | off | Mixed-precision training |
+
+<!--
+## Results
+
+Fill this in from your training logs, then delete the comment markers around this section.
+Every number here should come from a run you can reproduce.
+
+| Metric | Value |
+|---|---|
+| Final validation loss | |
+| Validation perplexity | |
+| GPU | |
+| Training time for 20,000 steps | |
+| Training throughput (tokens/s) | |
+| Generation speed with KV cache (tokens/s, batch size 1) | |
+
+![Validation loss](docs/val_loss.png)
+
+### Sample generations
+
+Prompt: "Once upon a time"
+> (paste a real output here, with the sampling settings you used)
+-->
+
+## Limitations
+
+- **Small by design.** 15.7M parameters trained on simple children's stories. Output is fluent only in that domain.
+- **512-token context.** RoPE isn't scaled, so quality past 512 tokens isn't expected.
+- **Tool use** needs tool-call training data the model hasn't seen; see Agent layer.
+
+## Next steps
+
+- Fine-tune on tool-call transcripts so the agent loop runs on the model itself.
+- Try position interpolation for RoPE and measure quality past 512 tokens.
+- Compare grouped-query and standard multi-head attention at equal parameter count.
 
 ## Acknowledgments
 
-- Architecture inspired by LLaMA (Meta AI)
-- Training data: TinyStories (Eldan & Li, Microsoft Research)
-- Built from scratch following modern best practices
+- Architecture follows LLaMA (Meta AI).
+- Training data: TinyStories (Eldan and Li, Microsoft Research).
+
+## License
+
+Released under the MIT License; see [LICENSE](LICENSE).
 
 ## Contact
 
-Sahil Vankudre
-
----
-
-**Note**: This is a learning project demonstrating deep understanding of transformer architecture, training pipelines, and agentic AI systems. The model is small by design for fast iteration and educational purposes.
+Sahil Vankudre · [GitHub](https://github.com/SahilVankudre) · [LinkedIn](https://linkedin.com/in/sahil-vankudre-175a6036b)
